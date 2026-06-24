@@ -126,6 +126,7 @@ string CFTPServerConn::GetFullPath(const char *arg) {
     if (s.empty() || s == "\\") {
         // No path or root - just return current path
     } else if (s.find('\\') == string::npos && s.find(':') == string::npos) {
+        if (m_curPath.empty()) return "";
         string cur = m_curPath[0];
         if (!cur.empty() && cur[cur.size()-1] == ':')
             cur = cur.substr(0, cur.size()-1);
@@ -152,7 +153,7 @@ string CFTPServerConn::GetFullPath(const char *arg) {
 string CFTPServerConn::FormatFileLine(const string &name, bool isDir, DWORD size) {
     char buf[256];
     char dir = isDir ? 'd' : '-';
-    sprintf_s(buf, "%crwxr-xr-x   1 root root    %d Jan 01  2000 %s\r\n", dir, size, name.c_str());
+    sprintf_s(buf, "%crwxr-xr-x   1 root root    %u Jan 01  2000 %s\r\n", dir, size, name.c_str());
     return string(buf);
 }
 
@@ -647,9 +648,9 @@ DWORD CFTPServerConn::Run() {
             SendReply("214 End");
         } else if (strcmp(cmd, "STOU") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            static unsigned int g_stouCounter = 0;
+            static volatile LONG g_stouCounter = 0;
             char num[16];
-            sprintf_s(num, "%u", ++g_stouCounter);
+            sprintf_s(num, "%u", (unsigned int)InterlockedIncrement(&g_stouCounter));
             string name = string("XeFTP_") + num;
             string fp = GetFullPath(name.c_str());
             SOCKET ds = AcceptOrConnect();
