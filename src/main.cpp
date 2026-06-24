@@ -20,10 +20,7 @@ static DWORD WINAPI ExitMonitor(LPVOID arg) {
                 g_running = 0;
                 break;
             }
-            if (state.Gamepad.wButtons & XINPUT_GAMEPAD_X) {
-                g_writeProtect = !g_writeProtect;
-                LogAdd("Write protect toggled: %s", g_writeProtect ? "ON" : "OFF");
-            }
+            // X button toggle removed - flash: is always read-only
         }
         Sleep(250);
     }
@@ -97,7 +94,7 @@ void __cdecl main() {
         ImGui::Text("Status");
         ImGui::Text("  IP:  %s :%d", g_ip.c_str(), g_port);
         ImGui::Text("  Connections:  %d", g_connCount);
-        ImGui::Text("  Write Protect:  %s", g_writeProtect ? "ON" : "OFF");
+        ImGui::Text("  Flash:  read-only");
 
         ImGui::Separator();
         ImGui::Text("Available Drives");
@@ -110,9 +107,7 @@ void __cdecl main() {
 
         ImGui::Separator();
         ImGui::Text("Controls");
-        ImGui::Text("  [X]  Toggle Write Protect");
         ImGui::Text("  BACK+START  Exit");
-        ImGui::Text("  [D-Pad] Navigate");
 
         ImGui::Separator();
         int cnt = LogCount();

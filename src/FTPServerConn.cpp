@@ -98,6 +98,13 @@ void CFTPServerConn::CloseDataSocket() {
     }
 }
 
+static bool IsWriteAllowed(const string &path) {
+    string low = path;
+    for (size_t i = 0; i < low.size(); i++) low[i] = (char)tolower(low[i]);
+    if (low.find("flash:") == 0) return false;
+    return true;
+}
+
 string CFTPServerConn::GetFullPath(const char *arg) {
     string s = arg;
     // Convert forward slashes to backslashes
@@ -117,13 +124,15 @@ string CFTPServerConn::GetFullPath(const char *arg) {
         }
         s = cur + s;
     } else {
-        // Convert to Win32 path
         if (s[0] == '\\') s = s.substr(1);
         if (s.find(':') == string::npos) {
             pos = s.find('\\');
             if (pos != string::npos) s.insert(pos, ":");
             else s += ":";
         }
+        pos = s.find(':');
+        if (pos != string::npos && pos + 1 < s.size() && s[pos + 1] != '\\')
+            s.insert(pos + 1, "\\");
     }
     return s;
 }
@@ -255,10 +264,13 @@ DWORD CFTPServerConn::Run() {
             SendReply(" RNTO");
             SendReply("211 End");
         } else if (strcmp(cmd, "PWD") == 0 || strcmp(cmd, "XPWD") == 0) {
-            string p = "";
+            string p;
             for (size_t i = 0; i < m_curPath.size(); i++) {
-                p += m_curPath[i];
-                if (i > 0) p += "/";
+                string seg = m_curPath[i];
+                if (!seg.empty() && seg[seg.size()-1] == ':')
+                    seg = seg.substr(0, seg.size()-1);
+                if (!p.empty()) p += "/";
+                p += seg;
             }
             if (p.empty()) p = "/";
             else p = "/" + p;
@@ -347,8 +359,8 @@ DWORD CFTPServerConn::Run() {
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "STOR") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
             string fp = GetFullPath(argBuf);
+            if (!IsWriteAllowed(fp)) { SendReply("550 Write protected"); continue; }
             SendReply("150 Opening BINARY data connection");
             SOCKET ds = AcceptOrConnect();
             if (ds == INVALID_SOCKET) {
@@ -375,8 +387,8 @@ DWORD CFTPServerConn::Run() {
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "APPE") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
             string fp = GetFullPath(argBuf);
+            if (!IsWriteAllowed(fp)) { SendReply("550 Write protected"); continue; }
             SOCKET ds = AcceptOrConnect();
             if (ds == INVALID_SOCKET) {
                 SendReply("425 Can't open data connection");
@@ -400,24 +412,24 @@ DWORD CFTPServerConn::Run() {
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "DELE") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
             string fp = GetFullPath(argBuf);
+            if (!IsWriteAllowed(fp)) { SendReply("550 Write protected"); continue; }
             if (DeleteFileA(fp.c_str()))
                 SendReply("250 File deleted");
             else
                 SendReply("550 Delete failed");
         } else if (strcmp(cmd, "RMD") == 0 || strcmp(cmd, "XRMD") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
             string fp = GetFullPath(argBuf);
+            if (!IsWriteAllowed(fp)) { SendReply("550 Write protected"); continue; }
             if (RemoveDirectoryA(fp.c_str()))
                 SendReply("250 Directory removed");
             else
                 SendReply("550 Remove failed");
         } else if (strcmp(cmd, "MKD") == 0 || strcmp(cmd, "XMKD") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
             string fp = GetFullPath(argBuf);
+            if (!IsWriteAllowed(fp)) { SendReply("550 Write protected"); continue; }
             if (CreateDirectoryA(fp.c_str(), NULL))
                 SendReply("257 Directory created");
             else
@@ -433,22 +445,39 @@ DWORD CFTPServerConn::Run() {
                 SendReply("250 OK");
             } else {
                 // Normalize: / -> \, strip leading root slash
+                bool absolute = (arg[0] == '/');
                 size_t p;
                 while ((p = arg.find('/')) != string::npos) arg[p] = '\\';
-                if (arg[0] == '\\') arg = arg.substr(1);
+                if (arg[0] == '\\') { absolute = true; arg = arg.substr(1); }
                 if (arg.empty()) { m_curPath.clear(); SendReply("250 OK"); continue; }
 
                 // Absolute (has colon) vs relative
                 bool hasColon = (arg.find(':') != string::npos);
                 bool hasSep = (arg.find('\\') != string::npos);
 
+                // Absolute paths missing colon — e.g. "hdd1\Content" from CWD /hdd1/Content
+                while (absolute && !hasColon) {
+                    size_t sc = arg.find('\\');
+                    if (sc == string::npos) {
+                        // single component: "hdd1" -> "hdd1:"
+                        arg += ":";
+                    } else {
+                        // "hdd1\Content" -> "hdd1:\Content"
+                        arg.insert(sc, ":");
+                    }
+                    hasColon = true;
+                }
                 // For first component without colon when m_curPath is empty, add colon
                 if (!hasColon && m_curPath.empty()) arg += ":";
 
                 // Check the target path exists
                 bool pathOk = false;
                 if (hasColon) {
-                    // Absolute drive path: check directly
+                    {
+                        size_t cc = arg.find(':');
+                        if (cc != string::npos && cc + 1 < arg.size() && arg[cc + 1] != '\\')
+                            arg.insert(cc + 1, "\\");
+                    }
                     string testPath = arg + "\\";
                     DWORD attr = GetFileAttributesA(testPath.c_str());
                     pathOk = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
@@ -553,17 +582,20 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "STAT") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
             if (argBuf[0] == 0) {
-                string p = "";
+                string p;
                 for (size_t i = 0; i < m_curPath.size(); i++) {
-                    p += m_curPath[i];
-                    if (i > 0) p += "/";
+                    string seg = m_curPath[i];
+                    if (!seg.empty() && seg[seg.size()-1] == ':')
+                        seg = seg.substr(0, seg.size()-1);
+                    if (!p.empty()) p += "/";
+                    p += seg;
                 }
                 if (p.empty()) p = "/";
                 else p = "/" + p;
                 SendReply("211-XeFTP status:");
                 SendReply(" Logged in: yes");
                 SendReply(" Current path: %s", p.c_str());
-                SendReply(" Write protect: %s", g_writeProtect ? "ON" : "OFF");
+                SendReply(" Flash: read-only");
                 SendReply("211 End");
             } else {
                 string fp = GetFullPath(argBuf);
@@ -586,7 +618,6 @@ DWORD CFTPServerConn::Run() {
             SendReply("214 End");
         } else if (strcmp(cmd, "STOU") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
             static unsigned int g_stouCounter = 0;
             char num[16];
             sprintf_s(num, "%u", ++g_stouCounter);
@@ -626,12 +657,7 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "ACCT") == 0) {
             SendReply("230 Account OK");
         } else if (strcmp(cmd, "SITE") == 0) {
-            if (_stricmp(argBuf, "WRITEPROTECT") == 0) {
-                g_writeProtect = !g_writeProtect;
-                SendReply("200 Write protect %s", g_writeProtect ? "ON" : "OFF");
-            } else {
-                SendReply("500 Unknown SITE command");
-            }
+            SendReply("500 Unknown SITE command");
         } else {
             SendReply("500 Unknown command");
         }

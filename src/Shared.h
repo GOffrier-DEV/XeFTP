@@ -4,7 +4,6 @@
 #define LOG_LINE_LEN 128
 
 extern int g_running;
-extern int g_writeProtect;
 extern string g_ip;
 extern int g_port;
 extern int g_connCount;

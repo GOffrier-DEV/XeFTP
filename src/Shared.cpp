@@ -8,7 +8,6 @@ static int g_logTotal = 0;
 static bool g_logInit = false;
 
 int g_running = 1;
-int g_writeProtect = 1;
 string g_ip = "0.0.0.0";
 int g_port = 21;
 int g_connCount = 0;

@@ -3,6 +3,7 @@
 #include <d3d9.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string>
 #include <vector>
 #include <map>
