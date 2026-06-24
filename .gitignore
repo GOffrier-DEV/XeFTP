@@ -1,0 +1,7 @@
+Release/
+Debug/
+*.obj
+*.pch
+*.ilk
+*.pdb
+xextool.exe
