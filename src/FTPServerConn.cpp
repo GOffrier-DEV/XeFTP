@@ -372,32 +372,38 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "CWD") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
             string arg = argBuf;
-            if (arg.empty() || arg == "/") {
+            if (arg.empty() || arg == "/" || arg == "\\") {
                 m_curPath.clear();
                 SendReply("250 OK");
             } else if (arg == "..") {
                 if (!m_curPath.empty()) m_curPath.pop_back();
                 SendReply("250 OK");
             } else {
-                // Replace / with \, strip leading root slash
+                // Normalize: / -> \, strip leading root slash
                 size_t p;
                 while ((p = arg.find('/')) != string::npos) arg[p] = '\\';
                 if (arg[0] == '\\') arg = arg.substr(1);
+                if (arg.empty()) { m_curPath.clear(); SendReply("250 OK"); continue; }
 
-                // Normalize: empty after stripping leading \ means root
-                if (arg.empty()) {
-                    m_curPath.clear();
-                    SendReply("250 OK");
-                    continue;
-                }
+                // Absolute (has colon) vs relative
+                bool hasColon = (arg.find(':') != string::npos);
+                bool hasSep = (arg.find('\\') != string::npos);
 
-                if (m_curPath.empty() && arg.find(':') == string::npos) arg += ":";
-                // Check if the path exists
+                // For first component without colon when m_curPath is empty, add colon
+                if (!hasColon && m_curPath.empty()) arg += ":";
+
+                // Check the target path exists
                 bool pathOk = false;
-                if (m_curPath.empty() && arg.find('\\') == string::npos) {
-                    // Drive-only: match against the mount table (same as root listing)
+                if (hasColon) {
+                    // Absolute drive path: check directly
+                    string testPath = arg + "\\";
+                    DWORD attr = GetFileAttributesA(testPath.c_str());
+                    pathOk = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
+                    if (pathOk) m_curPath.clear();
+                } else if (m_curPath.empty() && !hasSep) {
+                    // Drive-only: match against mount table
                     string drive = arg;
-                    if (!drive.empty() && drive[drive.size()-1] != ':') drive += ":";
+                    if (drive[drive.size()-1] != ':') drive += ":";
                     int count = GetDriveCount();
                     for (int i = 0; i < count; i++) {
                         const char *mount = GetDriveMountPoint(i);
@@ -407,6 +413,7 @@ DWORD CFTPServerConn::Run() {
                         }
                     }
                 } else {
+                    // Relative path: append to current
                     string testPath;
                     if (m_curPath.empty()) {
                         testPath = arg + "\\";
@@ -424,28 +431,31 @@ DWORD CFTPServerConn::Run() {
                     DWORD attr = GetFileAttributesA(testPath.c_str());
                     pathOk = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
                 }
-                if (pathOk) {
-                    // Split arg into parts and push
-                    string part = "";
-                    for (size_t i = 0; i < arg.length(); i++) {
-                        if (arg[i] == '\\') {
-                            if (!part.empty()) {
-                                if (m_curPath.empty() && part.find(':') == string::npos) part += ":";
-                                m_curPath.push_back(part);
-                                part = "";
-                            }
-                        } else {
-                            part += arg[i];
-                        }
-                    }
-                    if (!part.empty()) {
-                        if (m_curPath.empty() && part.find(':') == string::npos) part += ":";
-                        m_curPath.push_back(part);
-                    }
-                    SendReply("250 OK");
-                } else {
+
+                if (!pathOk) {
                     SendReply("550 Path not found");
+                    continue;
                 }
+
+                // Build m_curPath from arg parts
+                if (hasColon) m_curPath.clear();
+                string part = "";
+                for (size_t i = 0; i < arg.length(); i++) {
+                    if (arg[i] == '\\') {
+                        if (!part.empty()) {
+                            if (m_curPath.empty() && part.find(':') == string::npos) part += ":";
+                            m_curPath.push_back(part);
+                            part = "";
+                        }
+                    } else {
+                        part += arg[i];
+                    }
+                }
+                if (!part.empty()) {
+                    if (m_curPath.empty() && part.find(':') == string::npos) part += ":";
+                    m_curPath.push_back(part);
+                }
+                SendReply("250 OK");
             }
         } else if (strcmp(cmd, "SIZE") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
