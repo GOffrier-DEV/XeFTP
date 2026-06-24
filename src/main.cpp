@@ -85,38 +85,67 @@ void __cdecl main() {
         ImGui_ImplDX9_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::Begin("XeFTP", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse);
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(1240, 680), ImGuiCond_FirstUseEver);
+        ImGui::Begin("XeFTP Dashboard", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-        ImGui::Text("XeFTP - Xbox 360 FTP Server");
-
+        ImGui::TextColored(ImVec4(1,1,0,1), "XeFTP  -  Xbox 360 FTP Server");
+        ImGui::SameLine(ImGui::GetWindowWidth() - 180);
+        ImGui::Text("Connections: %d", g_connCount);
         ImGui::Separator();
-        ImGui::Text("Status");
-        ImGui::Text("  IP:  %s :%d", g_ip.c_str(), g_port);
-        ImGui::Text("  Connections:  %d", g_connCount);
-        ImGui::Text("  Flash:  read-only");
 
+        float colW = (ImGui::GetContentRegionAvail().x - 40) / 3.0f;
+
+        ImGui::BeginChild("##statuscol", ImVec2(colW, 0), true);
+        ImGui::TextColored(ImVec4(0,1,1,1), "Status");
         ImGui::Separator();
-        ImGui::Text("Available Drives");
+        ImGui::Text("IP:  %s", g_ip.c_str());
+        ImGui::Text("Port:  %d", g_port);
+        ImGui::Text("Connections:  %d", g_connCount);
+        ImGui::Text("Flash:  read-only");
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        ImGui::BeginChild("##drivescol", ImVec2(colW, 0), true);
+        ImGui::TextColored(ImVec4(0,1,1,1), "Available Drives");
+        ImGui::Separator();
         int dcount = GetDriveCount();
         for (int i = 0; i < dcount; i++) {
             const char *mnt = GetDriveMountPoint(i);
             if (mnt && CheckDriveExists(mnt))
-                ImGui::Text("  %s", mnt);
+                ImGui::BulletText("%s", mnt);
         }
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        ImGui::BeginChild("##controlscol", ImVec2(colW, 0), true);
+        ImGui::TextColored(ImVec4(0,1,1,1), "Controls");
+        ImGui::Separator();
+        ImGui::Text("BACK+START  Exit");
+        ImGui::EndChild();
 
         ImGui::Separator();
-        ImGui::Text("Controls");
-        ImGui::Text("  BACK+START  Exit");
+
+        ImGui::TextColored(ImVec4(0,1,1,1), "System Log");
+        ImGui::Separator();
+        int lcnt = LogCount();
+        int lstart = lcnt > 4 ? lcnt - 4 : 0;
+        for (int i = lstart; i < lcnt; i++)
+            ImGui::Text("%s", LogGet(i));
 
         ImGui::Separator();
-        int cnt = LogCount();
-        if (cnt > 0) {
-            ImGui::Text("Log");
-            int start = 0;
-            if (cnt > 10) start = cnt - 10;
-            for (int i = start; i < cnt; i++)
-                ImGui::Text("%s", LogGet(i));
+
+        if (ImGui::CollapsingHeader("Command Log", NULL, ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::BeginChild("##cmds", ImVec2(0, 240), false, ImGuiWindowFlags_HorizontalScrollbar);
+            int cmdN = CmdLogCount();
+            int cmdStart = cmdN > 200 ? cmdN - 200 : 0;
+            for (int i = cmdStart; i < cmdN; i++)
+                ImGui::Text("%s", CmdLogGet(i));
+            if (cmdN > 0)
+                ImGui::SetScrollHereY(1.0f);
+            ImGui::EndChild();
         }
 
         ImGui::End();

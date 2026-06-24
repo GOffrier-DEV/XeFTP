@@ -237,6 +237,12 @@ DWORD CFTPServerConn::Run() {
             strncpy_s(argBuf, cmdBuf + i + 1, _TRUNCATE);
         }
 
+        // Log command (mask password)
+        if (strcmp(cmd, "PASS") == 0)
+            CmdLogAdd("PASS ****");
+        else
+            CmdLogAdd("%s %s", cmd, argBuf[0] ? argBuf : "");
+
         // Handle command
         if (strcmp(cmd, "USER") == 0) {
             m_gotUser = true;

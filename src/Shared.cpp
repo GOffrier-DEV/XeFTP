@@ -36,6 +36,37 @@ int LogCount(void) {
     return g_logTotal < LOG_LINES ? g_logTotal : LOG_LINES;
 }
 
+// Command log (separate from system log)
+static CRITICAL_SECTION g_cmdLogLock;
+static char g_cmdLog[CMD_LOG_LINES][CMD_LOG_LINE_LEN];
+static int g_cmdLogIdx = 0;
+volatile int g_cmdLogTotal = 0;
+static bool g_cmdLogInit = false;
+
+void CmdLogAdd(const char *fmt, ...) {
+    if (!g_cmdLogInit) {
+        InitializeCriticalSection(&g_cmdLogLock);
+        ZeroMemory(g_cmdLog, sizeof(g_cmdLog));
+        g_cmdLogInit = true;
+    }
+    EnterCriticalSection(&g_cmdLogLock);
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf_s(g_cmdLog[g_cmdLogIdx], CMD_LOG_LINE_LEN, _TRUNCATE, fmt, args);
+    va_end(args);
+    g_cmdLogIdx = (g_cmdLogIdx + 1) % CMD_LOG_LINES;
+    g_cmdLogTotal++;
+    LeaveCriticalSection(&g_cmdLogLock);
+}
+
+const char* CmdLogGet(int i) {
+    return g_cmdLog[(g_cmdLogIdx + i) % CMD_LOG_LINES];
+}
+
+int CmdLogCount(void) {
+    return g_cmdLogTotal < CMD_LOG_LINES ? g_cmdLogTotal : CMD_LOG_LINES;
+}
+
 string PathToWin(string p) {
     if (p.empty()) return "";
     if (p[0] == '/') p = p.substr(1);
