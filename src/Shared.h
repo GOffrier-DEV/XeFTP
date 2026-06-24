@@ -17,3 +17,8 @@ string PathToFtp(string p);
 
 // Drive mounting (from FSD)
 void MountAllDrives();
+
+// Drive table info - iterate available drives
+int GetDriveCount();
+const char* GetDriveMountPoint(int i);
+bool CheckDriveExists(const char *driveWithColon);

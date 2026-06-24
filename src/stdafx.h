@@ -13,5 +13,9 @@ typedef struct _STRING {
     PCHAR Buffer;
 } STRING;
 
+#ifndef INVALID_FILE_ATTRIBUTES
+#define INVALID_FILE_ATTRIBUTES 0xFFFFFFFF
+#endif
+
 extern "C" int ObCreateSymbolicLink(STRING*, STRING*);
 extern "C" int ObDeleteSymbolicLink(STRING*);

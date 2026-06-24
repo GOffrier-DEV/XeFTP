@@ -3,10 +3,6 @@
 #include "Auth.h"
 #include "Shared.h"
 
-#ifndef INVALID_FILE_ATTRIBUTES
-#define INVALID_FILE_ATTRIBUTES 0xFFFFFFFF
-#endif
-
 CFTPServerConn::CFTPServerConn()
     : m_loggedIn(false), m_gotUser(false), m_passive(true), m_active(false),
       m_thread(NULL), m_cmdSocket(INVALID_SOCKET), m_passiveSocket(INVALID_SOCKET),
@@ -124,49 +120,21 @@ string CFTPServerConn::FormatFileLine(const string &name, bool isDir, DWORD size
     return string(buf);
 }
 
-static DWORD CheckDriveAttr(const char *name) {
-    // Try given case first, then lowercase, then capital first letter
-    string path = string(name) + ":\\";
-    DWORD attr = GetFileAttributesA(path.c_str());
-    if (attr != INVALID_FILE_ATTRIBUTES) return attr;
-    // Try all lowercase
-    string lower = name;
-    for (size_t i = 0; i < lower.size(); i++) lower[i] = (char)tolower(lower[i]);
-    path = lower + ":\\";
-    attr = GetFileAttributesA(path.c_str());
-    if (attr != INVALID_FILE_ATTRIBUTES) return attr;
-    // Try capital first letter
-    string cap = lower;
-    if (!cap.empty()) cap[0] = (char)toupper(cap[0]);
-    path = cap + ":\\";
-    attr = GetFileAttributesA(path.c_str());
-    if (attr != INVALID_FILE_ATTRIBUTES) return attr;
-    return INVALID_FILE_ATTRIBUTES;
-}
-
 void CFTPServerConn::ListDirectory(SOCKET s) {
     if (m_curPath.empty()) {
-        // Method 1: enumerate \\* for mount points
-        WIN32_FIND_DATAA ffd;
-        HANDLE h = FindFirstFileA("\\*", &ffd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do {
-                string name = ffd.cFileName;
-                if (name == "." || name == "..") continue;
-                bool isDir = (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                string line = FormatFileLine(name + ":", isDir, ffd.nFileSizeLow);
+        // Iterate our mount table and list drives that exist
+        int count = GetDriveCount();
+        for (int i = 0; i < count; i++) {
+            const char *mount = GetDriveMountPoint(i);
+            if (!mount) continue;
+            // Skip the dummy game: entry - game: already shows from system mount
+            if (_stricmp(mount, "game:") == 0 && GetFileAttributesA("game:\\") != INVALID_FILE_ATTRIBUTES) {
+                string line = FormatFileLine(mount, true, 0);
                 send(s, line.c_str(), (int)line.length(), 0);
-            } while (FindNextFileA(h, &ffd));
-            FindClose(h);
-            return;
-        }
-
-        // Method 2: try known drive names with case variants
-        const char *driveNames[] = {"hdd1", "hddx", "hdd", "usb0", "flash", "dvd", "game", "mu", NULL};
-        for (int i = 0; driveNames[i]; i++) {
-            DWORD attr = CheckDriveAttr(driveNames[i]);
-            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                string line = FormatFileLine(string(driveNames[i]) + ":", true, 0);
+                continue;
+            }
+            if (CheckDriveExists(mount)) {
+                string line = FormatFileLine(mount, true, 0);
                 send(s, line.c_str(), (int)line.length(), 0);
             }
         }
@@ -416,22 +384,29 @@ DWORD CFTPServerConn::Run() {
                 while ((p = arg.find('/')) != string::npos) arg[p] = '\\';
                 if (m_curPath.empty() && arg.find(':') == string::npos) arg += ":";
                 // Check if the path exists
-                string testPath = "";
-                if (m_curPath.empty()) {
-                    testPath = arg + "\\";
+                bool pathOk = false;
+                if (m_curPath.empty() && arg.find('\\') == string::npos) {
+                    // Drive-only: use CheckDriveExists for case-insensitive matching
+                    pathOk = CheckDriveExists(arg.c_str());
                 } else {
-                    string base = m_curPath[0];
-                    if (!base.empty() && base[base.size()-1] == ':')
-                        base = base.substr(0, base.size()-1);
-                    testPath = base + ":\\";
-                    for (size_t i = 1; i < m_curPath.size(); i++) {
-                        testPath += m_curPath[i];
-                        testPath += "\\";
+                    string testPath;
+                    if (m_curPath.empty()) {
+                        testPath = arg + "\\";
+                    } else {
+                        string base = m_curPath[0];
+                        if (!base.empty() && base[base.size()-1] == ':')
+                            base = base.substr(0, base.size()-1);
+                        testPath = base + ":\\";
+                        for (size_t i = 1; i < m_curPath.size(); i++) {
+                            testPath += m_curPath[i];
+                            testPath += "\\";
+                        }
+                        testPath += arg + "\\";
                     }
-                    testPath += arg + "\\";
+                    DWORD attr = GetFileAttributesA(testPath.c_str());
+                    pathOk = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
                 }
-                DWORD attr = GetFileAttributesA(testPath.c_str());
-                if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (pathOk) {
                     // Split arg into parts and push
                     string part = "";
                     for (size_t i = 0; i < arg.length(); i++) {

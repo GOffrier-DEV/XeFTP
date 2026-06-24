@@ -85,12 +85,43 @@ static const DriveEntry g_driveTable[] = {
     {"usbmucache0:", "\\Device\\Mass0PartitionFile\\StorageSystem"},
     {"usbmucache1:", "\\Device\\Mass1PartitionFile\\StorageSystem"},
     {"usbmucache2:", "\\Device\\Mass2PartitionFile\\StorageSystem"},
+    {"game:", ""},  // pre-mounted by system, skip in MountAllDrives
 };
 
+static const int g_driveCount = sizeof(g_driveTable) / sizeof(g_driveTable[0]);
+
+int GetDriveCount() { return g_driveCount; }
+
+const char* GetDriveMountPoint(int i) {
+    if (i < 0 || i >= g_driveCount) return NULL;
+    return g_driveTable[i].mountPoint;
+}
+
+bool CheckDriveExists(const char *driveWithColon) {
+    // Try the given name, lowercase, and capital-first-letter variants
+    string path = string(driveWithColon) + "\\";
+    DWORD attr = GetFileAttributesA(path.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES) return true;
+
+    string lower = driveWithColon;
+    for (size_t i = 0; i < lower.size(); i++) lower[i] = (char)tolower(lower[i]);
+    path = lower + "\\";
+    attr = GetFileAttributesA(path.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES) return true;
+
+    string cap = lower;
+    if (!cap.empty()) cap[0] = (char)toupper(cap[0]);
+    path = cap + "\\";
+    attr = GetFileAttributesA(path.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES) return true;
+
+    return false;
+}
+
 void MountAllDrives() {
-    for (int i = 0; i < (int)(sizeof(g_driveTable) / sizeof(g_driveTable[0])); i++) {
+    for (int i = 0; i < g_driveCount; i++) {
         // Skip Game: - it's already mounted by the system
-        if (_stricmp(g_driveTable[i].mountPoint, "Game:") == 0) continue;
+        if (_stricmp(g_driveTable[i].mountPoint, "game:") == 0) continue;
 
         char mountConv[260];
         sprintf_s(mountConv, "\\??\\%s", g_driveTable[i].mountPoint);
