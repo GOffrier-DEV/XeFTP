@@ -1,5 +1,6 @@
 #pragma once
 #include <xtl.h>
+#include <d3d9.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
