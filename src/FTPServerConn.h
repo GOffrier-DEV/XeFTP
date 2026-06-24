@@ -1,7 +1,7 @@
 #pragma once
 #include "stdafx.h"
 
-#define XFER_BUF_SIZE (256*1024)
+#define XFER_BUF_SIZE (1024*1024)
 
 class CFTPServerConn {
 private:
