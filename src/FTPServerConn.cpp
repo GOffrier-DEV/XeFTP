@@ -395,8 +395,17 @@ DWORD CFTPServerConn::Run() {
                 // Check if the path exists
                 bool pathOk = false;
                 if (m_curPath.empty() && arg.find('\\') == string::npos) {
-                    // Drive-only: use CheckDriveExists for case-insensitive matching
-                    pathOk = CheckDriveExists(arg.c_str());
+                    // Drive-only: match against the mount table (same as root listing)
+                    string drive = arg;
+                    if (!drive.empty() && drive[drive.size()-1] != ':') drive += ":";
+                    int count = GetDriveCount();
+                    for (int i = 0; i < count; i++) {
+                        const char *mount = GetDriveMountPoint(i);
+                        if (mount && _stricmp(mount, drive.c_str()) == 0) {
+                            pathOk = CheckDriveExists(mount);
+                            break;
+                        }
+                    }
                 } else {
                     string testPath;
                     if (m_curPath.empty()) {
