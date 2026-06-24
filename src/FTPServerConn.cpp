@@ -63,7 +63,7 @@ int CFTPServerConn::CreatePassiveSocket() {
     getsockname(s, (sockaddr*)&local, &len);
     m_passivePort = ntohs(local.sin_port);
 
-    if (listen(s, 1) == SOCKET_ERROR) {
+    if (listen(s, SOMAXCONN) == SOCKET_ERROR) {
         closesocket(s);
         return -1;
     }
@@ -347,7 +347,7 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "RETR") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
             string fp = GetFullPath(argBuf);
-            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
             if (hFile == INVALID_HANDLE_VALUE) {
                 SendReply("550 File not found");
                 continue;
