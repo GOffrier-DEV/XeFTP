@@ -45,9 +45,6 @@ int CFTPServerConn::CreatePassiveSocket() {
     BOOL on = TRUE;
     setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
     setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
-    int buf = 256 * 1024;
-    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (PCSTR)&buf, sizeof(buf));
-    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (PCSTR)&buf, sizeof(buf));
 
     sockaddr_in local;
     local.sin_family = AF_INET;
@@ -63,20 +60,18 @@ int CFTPServerConn::CreatePassiveSocket() {
     getsockname(s, (sockaddr*)&local, &len);
     m_passivePort = ntohs(local.sin_port);
 
-    if (listen(s, SOMAXCONN) == SOCKET_ERROR) {
+    if (listen(s, 8) == SOCKET_ERROR) {
         closesocket(s);
         return -1;
     }
     return (int)s;
 }
 
-static void TuneDataSocket(SOCKET s) {
-    BOOL on = TRUE;
-    setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
-    setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
-    int buf = 256 * 1024;
+static void TuneSocketBuffers(SOCKET s) {
+    int buf = 128 * 1024;
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, (PCSTR)&buf, sizeof(buf));
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, (PCSTR)&buf, sizeof(buf));
+    BOOL on = TRUE;
     setsockopt(s, IPPROTO_TCP, 0x0001, (PCSTR)&on, sizeof(BOOL));
 }
 
@@ -84,12 +79,15 @@ SOCKET CFTPServerConn::AcceptOrConnect() {
     m_abortFlag = false;
     if (m_passive) {
         m_dataSocket = accept(m_passiveSocket, NULL, NULL);
-        if (m_dataSocket != INVALID_SOCKET) TuneDataSocket(m_dataSocket);
+        if (m_dataSocket != INVALID_SOCKET) TuneSocketBuffers(m_dataSocket);
         return m_dataSocket;
     } else {
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
         if (s == INVALID_SOCKET) return INVALID_SOCKET;
-        TuneDataSocket(s);
+        BOOL on = TRUE;
+        setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
+        setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
+        TuneSocketBuffers(s);
         if (connect(s, (sockaddr*)&m_xferAddr, sizeof(m_xferAddr)) < 0) {
             closesocket(s);
             return INVALID_SOCKET;
@@ -371,7 +369,7 @@ DWORD CFTPServerConn::Run() {
                 int sent = 0;
                 while (sent < (int)n) {
                     int r = send(ds, m_xferBuf + sent, n - sent, 0);
-                    if (r <= 0) break;
+                    if (r <= 0) { m_abortFlag = true; break; }
                     sent += r;
                 }
             }
@@ -403,10 +401,10 @@ DWORD CFTPServerConn::Run() {
             }
             m_restPos = 0;
             int n;
+            DWORD written;
             while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
                 if (m_abortFlag) break;
-                DWORD written;
-                WriteFile(hFile, m_xferBuf, n, &written, NULL);
+                if (!WriteFile(hFile, m_xferBuf, n, &written, NULL)) { m_abortFlag = true; break; }
             }
             CloseHandle(hFile);
             CloseDataSocket();
