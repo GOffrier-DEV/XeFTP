@@ -379,9 +379,18 @@ DWORD CFTPServerConn::Run() {
                 if (!m_curPath.empty()) m_curPath.pop_back();
                 SendReply("250 OK");
             } else {
-                // Replace / with \, add : for drive
+                // Replace / with \, strip leading root slash
                 size_t p;
                 while ((p = arg.find('/')) != string::npos) arg[p] = '\\';
+                if (arg[0] == '\\') arg = arg.substr(1);
+
+                // Normalize: empty after stripping leading \ means root
+                if (arg.empty()) {
+                    m_curPath.clear();
+                    SendReply("250 OK");
+                    continue;
+                }
+
                 if (m_curPath.empty() && arg.find(':') == string::npos) arg += ":";
                 // Check if the path exists
                 bool pathOk = false;
