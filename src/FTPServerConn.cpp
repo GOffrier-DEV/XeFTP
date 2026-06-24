@@ -12,6 +12,7 @@ CFTPServerConn::CFTPServerConn()
 }
 
 CFTPServerConn::~CFTPServerConn() {
+    if (m_dataSocket != INVALID_SOCKET) closesocket(m_dataSocket);
     if (m_cmdSocket != INVALID_SOCKET) closesocket(m_cmdSocket);
     if (m_passiveSocket != INVALID_SOCKET) closesocket(m_passiveSocket);
 }
@@ -67,10 +68,7 @@ int CFTPServerConn::CreatePassiveSocket() {
     return (int)s;
 }
 
-static void TuneSocketBuffers(SOCKET s) {
-    int buf = 128 * 1024;
-    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (PCSTR)&buf, sizeof(buf));
-    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (PCSTR)&buf, sizeof(buf));
+static void TuneDataSocket(SOCKET s) {
     BOOL on = TRUE;
     setsockopt(s, IPPROTO_TCP, 0x0001, (PCSTR)&on, sizeof(BOOL));
 }
@@ -79,7 +77,7 @@ SOCKET CFTPServerConn::AcceptOrConnect() {
     m_abortFlag = false;
     if (m_passive) {
         m_dataSocket = accept(m_passiveSocket, NULL, NULL);
-        if (m_dataSocket != INVALID_SOCKET) TuneSocketBuffers(m_dataSocket);
+        if (m_dataSocket != INVALID_SOCKET) TuneDataSocket(m_dataSocket);
         return m_dataSocket;
     } else {
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
@@ -87,7 +85,7 @@ SOCKET CFTPServerConn::AcceptOrConnect() {
         BOOL on = TRUE;
         setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
         setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
-        TuneSocketBuffers(s);
+        TuneDataSocket(s);
         if (connect(s, (sockaddr*)&m_xferAddr, sizeof(m_xferAddr)) < 0) {
             closesocket(s);
             return INVALID_SOCKET;
