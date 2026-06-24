@@ -202,8 +202,6 @@ void CFTPServerConn::ListDirectory(SOCKET s) {
 
 DWORD CFTPServerConn::Run() {
     m_active = true;
-    LogAdd("FTP client connected");
-
     SendReply("220 XeFTP ready");
 
     char cmdBuf[512];
@@ -249,12 +247,6 @@ DWORD CFTPServerConn::Run() {
         if (cmdBuf[i] == ' ') {
             strncpy_s(argBuf, cmdBuf + i + 1, _TRUNCATE);
         }
-
-        // Log command (mask password)
-        if (strcmp(cmd, "PASS") == 0)
-            CmdLogAdd("PASS ****");
-        else
-            CmdLogAdd("%s %s", cmd, argBuf[0] ? argBuf : "");
 
         // Handle command
         if (strcmp(cmd, "USER") == 0) {

@@ -55,11 +55,9 @@ static bool CreateD3DDevice() {
 
 void __cdecl main() {
     MountAllDrives();
-    LogAdd("XeFTP starting...");
     CFTPServer::Instance().Start(21);
 
     if (!CreateD3DDevice()) {
-        LogAdd("Failed to create D3D9 device");
         goto wait_exit;
     }
 
@@ -69,11 +67,9 @@ void __cdecl main() {
     ImGui::StyleColorsDark();
 
     if (!ImGui_ImplXbox360_Init()) {
-        LogAdd("ImGui_ImplXbox360_Init failed");
         goto shutdown_d3d;
     }
     if (!ImGui_ImplDX9_Init(g_dev)) {
-        LogAdd("ImGui_ImplDX9_Init failed");
         ImGui_ImplXbox360_Shutdown();
         goto shutdown_d3d;
     }
@@ -125,28 +121,6 @@ void __cdecl main() {
         ImGui::Separator();
         ImGui::Text("BACK+START  Exit");
         ImGui::EndChild();
-
-        ImGui::Separator();
-
-        ImGui::TextColored(ImVec4(0,1,1,1), "System Log");
-        ImGui::Separator();
-        int lcnt = LogCount();
-        int lstart = lcnt > 4 ? lcnt - 4 : 0;
-        for (int i = lstart; i < lcnt; i++)
-            ImGui::Text("%s", LogGet(i));
-
-        ImGui::Separator();
-
-        if (ImGui::CollapsingHeader("Command Log", NULL, ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::BeginChild("##cmds", ImVec2(0, 240), false, ImGuiWindowFlags_HorizontalScrollbar);
-            int cmdN = CmdLogCount();
-            int cmdStart = cmdN > 200 ? cmdN - 200 : 0;
-            for (int i = cmdStart; i < cmdN; i++)
-                ImGui::Text("%s", CmdLogGet(i));
-            if (cmdN > 0)
-                ImGui::SetScrollHereY(1.0f);
-            ImGui::EndChild();
-        }
 
         ImGui::End();
 

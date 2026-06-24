@@ -4,4 +4,16 @@ Debug/
 *.pch
 *.ilk
 *.pdb
-xextool.exe
+*.idb
+*.exe
+*.xex
+te
+imgui/.clang-format
+imgui/.editorconfig
+imgui/.gitignore
+imgui/.gitmodules
+imgui/.vscode/
+imgui/LICENSE
+imgui/README.md
+imgui/examples/
+imgui/resources/

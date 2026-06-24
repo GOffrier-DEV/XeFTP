@@ -1,92 +1,10 @@
 #include "stdafx.h"
 #include "Shared.h"
 
-static CRITICAL_SECTION g_logLock;
-static char g_log[LOG_LINES][LOG_LINE_LEN];
-static int g_logIdx = 0;
-static int g_logTotal = 0;
-static bool g_logInit = false;
-
 volatile int g_running = 1;
 string g_ip = "0.0.0.0";
 int g_port = 21;
 int g_connCount = 0;
-
-void LogAdd(const char *fmt, ...) {
-    if (!g_logInit) {
-        InitializeCriticalSection(&g_logLock);
-        ZeroMemory(g_log, sizeof(g_log));
-        g_logInit = true;
-    }
-    EnterCriticalSection(&g_logLock);
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf_s(g_log[g_logIdx], LOG_LINE_LEN, _TRUNCATE, fmt, args);
-    va_end(args);
-    g_logIdx = (g_logIdx + 1) % LOG_LINES;
-    g_logTotal++;
-    LeaveCriticalSection(&g_logLock);
-}
-
-const char* LogGet(int i) {
-    return g_log[(g_logIdx + i) % LOG_LINES];
-}
-
-int LogCount(void) {
-    return g_logTotal < LOG_LINES ? g_logTotal : LOG_LINES;
-}
-
-// Command log (separate from system log)
-static CRITICAL_SECTION g_cmdLogLock;
-static char g_cmdLog[CMD_LOG_LINES][CMD_LOG_LINE_LEN];
-static int g_cmdLogIdx = 0;
-volatile int g_cmdLogTotal = 0;
-static bool g_cmdLogInit = false;
-
-void CmdLogAdd(const char *fmt, ...) {
-    if (!g_cmdLogInit) {
-        InitializeCriticalSection(&g_cmdLogLock);
-        ZeroMemory(g_cmdLog, sizeof(g_cmdLog));
-        g_cmdLogInit = true;
-    }
-    EnterCriticalSection(&g_cmdLogLock);
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf_s(g_cmdLog[g_cmdLogIdx], CMD_LOG_LINE_LEN, _TRUNCATE, fmt, args);
-    va_end(args);
-    g_cmdLogIdx = (g_cmdLogIdx + 1) % CMD_LOG_LINES;
-    g_cmdLogTotal++;
-    LeaveCriticalSection(&g_cmdLogLock);
-}
-
-const char* CmdLogGet(int i) {
-    return g_cmdLog[(g_cmdLogIdx + i) % CMD_LOG_LINES];
-}
-
-int CmdLogCount(void) {
-    return g_cmdLogTotal < CMD_LOG_LINES ? g_cmdLogTotal : CMD_LOG_LINES;
-}
-
-string PathToWin(string p) {
-    if (p.empty()) return "";
-    if (p[0] == '/') p = p.substr(1);
-    size_t pos;
-    while ((pos = p.find('/')) != string::npos) p.replace(pos, 1, "\\");
-    if (p.find(':') == string::npos) {
-        pos = p.find('\\');
-        if (pos != string::npos) p.insert(pos, ":");
-        else p += ":";
-    }
-    return p;
-}
-
-string PathToFtp(string p) {
-    size_t pos;
-    while ((pos = p.find('\\')) != string::npos) p.replace(pos, 1, "/");
-    while ((pos = p.find(':')) != string::npos) p.erase(pos, 1);
-    if (p[0] != '/') p = "/" + p;
-    return p;
-}
 
 struct DriveEntry {
     const char *mountPoint;
@@ -161,9 +79,6 @@ void MountAllDrives() {
         STRING sSysPath = { (USHORT)strlen(sysPath), (USHORT)strlen(sysPath) + 1, sysPath };
         STRING sMountConv = { (USHORT)strlen(mountConv), (USHORT)strlen(mountConv) + 1, mountConv };
 
-        int res = ObCreateSymbolicLink(&sMountConv, &sSysPath);
-        if (res == 0) {
-            LogAdd("Mounted %s", g_driveTable[i].mountPoint);
-        }
+        ObCreateSymbolicLink(&sMountConv, &sSysPath);
     }
 }
