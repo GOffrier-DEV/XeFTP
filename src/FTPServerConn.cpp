@@ -5,8 +5,9 @@
 
 CFTPServerConn::CFTPServerConn()
     : m_loggedIn(false), m_gotUser(false), m_passive(true), m_active(false),
-      m_thread(NULL), m_cmdSocket(INVALID_SOCKET), m_passiveSocket(INVALID_SOCKET),
-      m_passivePort(0) {
+      m_abortFlag(false), m_thread(NULL), m_cmdSocket(INVALID_SOCKET),
+      m_passiveSocket(INVALID_SOCKET), m_dataSocket(INVALID_SOCKET),
+      m_passivePort(0), m_restPos(0) {
     ZeroMemory(&m_xferAddr, sizeof(m_xferAddr));
 }
 
@@ -67,8 +68,10 @@ int CFTPServerConn::CreatePassiveSocket() {
 }
 
 SOCKET CFTPServerConn::AcceptOrConnect() {
+    m_abortFlag = false;
     if (m_passive) {
-        return accept(m_passiveSocket, NULL, NULL);
+        m_dataSocket = accept(m_passiveSocket, NULL, NULL);
+        return m_dataSocket;
     } else {
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
         if (s == INVALID_SOCKET) return INVALID_SOCKET;
@@ -79,7 +82,19 @@ SOCKET CFTPServerConn::AcceptOrConnect() {
             closesocket(s);
             return INVALID_SOCKET;
         }
+        m_dataSocket = s;
         return s;
+    }
+}
+
+void CFTPServerConn::CloseDataSocket() {
+    if (m_dataSocket != INVALID_SOCKET) {
+        closesocket(m_dataSocket);
+        m_dataSocket = INVALID_SOCKET;
+    }
+    if (m_passiveSocket != INVALID_SOCKET) {
+        closesocket(m_passiveSocket);
+        m_passiveSocket = INVALID_SOCKET;
     }
 }
 
@@ -232,6 +247,12 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "FEAT") == 0) {
             SendReply("211-Extensions:");
             SendReply(" SIZE");
+            SendReply(" MDTM");
+            SendReply(" REST STREAM");
+            SendReply(" APPE");
+            SendReply(" STOU");
+            SendReply(" RNFR");
+            SendReply(" RNTO");
             SendReply("211 End");
         } else if (strcmp(cmd, "PWD") == 0 || strcmp(cmd, "XPWD") == 0) {
             string p = "";
@@ -291,7 +312,7 @@ DWORD CFTPServerConn::Run() {
                 continue;
             }
             ListDirectory(ds);
-            closesocket(ds);
+            CloseDataSocket();
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "RETR") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
@@ -302,6 +323,8 @@ DWORD CFTPServerConn::Run() {
                 SendReply("550 File not found");
                 continue;
             }
+            if (m_restPos > 0) fseek(f, (long)m_restPos, SEEK_SET);
+            m_restPos = 0;
             SendReply("150 Opening BINARY data connection");
             SOCKET ds = AcceptOrConnect();
             if (ds == INVALID_SOCKET) {
@@ -311,6 +334,7 @@ DWORD CFTPServerConn::Run() {
             }
             int n;
             while ((n = (int)fread(m_xferBuf, 1, XFER_BUF_SIZE, f)) > 0) {
+                if (m_abortFlag) break;
                 int sent = 0;
                 while (sent < n) {
                     int r = send(ds, m_xferBuf + sent, n - sent, 0);
@@ -319,7 +343,7 @@ DWORD CFTPServerConn::Run() {
                 }
             }
             fclose(f);
-            closesocket(ds);
+            CloseDataSocket();
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "STOR") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
@@ -332,18 +356,47 @@ DWORD CFTPServerConn::Run() {
                 continue;
             }
             FILE *f = NULL;
-            fopen_s(&f, fp.c_str(), "wb");
+            const char *mode = (m_restPos > 0) ? "ab" : "wb";
+            fopen_s(&f, fp.c_str(), mode);
             if (!f) {
-                closesocket(ds);
+                CloseDataSocket();
                 SendReply("550 Can't create file");
                 continue;
             }
+            if (m_restPos > 0) fseek(f, (long)m_restPos, SEEK_SET);
+            m_restPos = 0;
             int n;
             while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
+                if (m_abortFlag) break;
                 fwrite(m_xferBuf, 1, n, f);
             }
             fclose(f);
-            closesocket(ds);
+            CloseDataSocket();
+            SendReply("226 Transfer complete");
+        } else if (strcmp(cmd, "APPE") == 0) {
+            if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
+            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
+            string fp = GetFullPath(argBuf);
+            SOCKET ds = AcceptOrConnect();
+            if (ds == INVALID_SOCKET) {
+                SendReply("425 Can't open data connection");
+                continue;
+            }
+            FILE *f = NULL;
+            fopen_s(&f, fp.c_str(), "ab");
+            if (!f) {
+                CloseDataSocket();
+                SendReply("550 Can't open file");
+                continue;
+            }
+            SendReply("150 Opening BINARY data connection");
+            int n;
+            while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
+                if (m_abortFlag) break;
+                fwrite(m_xferBuf, 1, n, f);
+            }
+            fclose(f);
+            CloseDataSocket();
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "DELE") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
@@ -473,6 +526,105 @@ DWORD CFTPServerConn::Run() {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
             if (!m_curPath.empty()) m_curPath.pop_back();
             SendReply("250 OK");
+        } else if (strcmp(cmd, "RNFR") == 0) {
+            if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
+            m_renameFrom = GetFullPath(argBuf);
+            SendReply("350 Ready for destination name");
+        } else if (strcmp(cmd, "RNTO") == 0) {
+            if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
+            if (m_renameFrom.empty()) {
+                SendReply("503 Need RNFR first");
+                continue;
+            }
+            string fp = GetFullPath(argBuf);
+            if (MoveFileA(m_renameFrom.c_str(), fp.c_str()))
+                SendReply("250 Rename OK");
+            else
+                SendReply("550 Rename failed");
+            m_renameFrom.clear();
+        } else if (strcmp(cmd, "REST") == 0) {
+            if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
+            m_restPos = _strtoui64(argBuf, NULL, 10);
+            SendReply("350 Restart at %I64u", m_restPos);
+        } else if (strcmp(cmd, "ABOR") == 0) {
+            m_abortFlag = true;
+            CloseDataSocket();
+            SendReply("226 ABOR OK");
+        } else if (strcmp(cmd, "STAT") == 0) {
+            if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
+            if (argBuf[0] == 0) {
+                string p = "";
+                for (size_t i = 0; i < m_curPath.size(); i++) {
+                    p += m_curPath[i];
+                    if (i > 0) p += "/";
+                }
+                if (p.empty()) p = "/";
+                else p = "/" + p;
+                SendReply("211-XeFTP status:");
+                SendReply(" Logged in: yes");
+                SendReply(" Current path: %s", p.c_str());
+                SendReply(" Write protect: %s", g_writeProtect ? "ON" : "OFF");
+                SendReply("211 End");
+            } else {
+                string fp = GetFullPath(argBuf);
+                HANDLE h = CreateFileA(fp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+                if (h == INVALID_HANDLE_VALUE) {
+                    SendReply("550 File not found");
+                } else {
+                    LARGE_INTEGER sz;
+                    GetFileSizeEx(h, &sz);
+                    CloseHandle(h);
+                    SendReply("213 %I64u", sz.QuadPart);
+                }
+            }
+        } else if (strcmp(cmd, "HELP") == 0) {
+            SendReply("214-The following commands are supported:");
+            SendReply(" USER PASS QUIT SYST FEAT PWD TYPE MODE STRU");
+            SendReply(" NOOP PASV PORT LIST NLST RETR STOR APPE STOU");
+            SendReply(" DELE RMD MKD CWD CDUP PWD SIZE RNFR RNTO");
+            SendReply(" REST ABOR STAT HELP SITE REIN ACCT ALLO");
+            SendReply("214 End");
+        } else if (strcmp(cmd, "STOU") == 0) {
+            if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
+            if (g_writeProtect) { SendReply("550 Write protected"); continue; }
+            static unsigned int g_stouCounter = 0;
+            char num[16];
+            sprintf_s(num, "%u", ++g_stouCounter);
+            string name = string("XeFTP_") + num;
+            string fp = GetFullPath(name.c_str());
+            SOCKET ds = AcceptOrConnect();
+            if (ds == INVALID_SOCKET) {
+                SendReply("425 Can't open data connection");
+                continue;
+            }
+            FILE *f = NULL;
+            fopen_s(&f, fp.c_str(), "wb");
+            if (!f) {
+                CloseDataSocket();
+                SendReply("550 Can't create file");
+                continue;
+            }
+            SendReply("150 Opening BINARY data connection for %s", name.c_str());
+            int n;
+            while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
+                if (m_abortFlag) break;
+                fwrite(m_xferBuf, 1, n, f);
+            }
+            fclose(f);
+            CloseDataSocket();
+            SendReply("226 Transfer complete, %s", name.c_str());
+        } else if (strcmp(cmd, "ALLO") == 0) {
+            SendReply("202 Allocate OK");
+        } else if (strcmp(cmd, "REIN") == 0) {
+            m_loggedIn = false;
+            m_gotUser = false;
+            m_curPath.clear();
+            m_renameFrom.clear();
+            m_restPos = 0;
+            CloseDataSocket();
+            SendReply("220 Service ready for new user");
+        } else if (strcmp(cmd, "ACCT") == 0) {
+            SendReply("230 Account OK");
         } else if (strcmp(cmd, "SITE") == 0) {
             if (_stricmp(argBuf, "WRITEPROTECT") == 0) {
                 g_writeProtect = !g_writeProtect;
