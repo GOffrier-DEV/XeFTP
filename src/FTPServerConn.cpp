@@ -69,6 +69,9 @@ int CFTPServerConn::CreatePassiveSocket() {
 }
 
 static void TuneDataSocket(SOCKET s) {
+    int buf = 48 * 1024;
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (PCSTR)&buf, sizeof(buf));
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (PCSTR)&buf, sizeof(buf));
     BOOL on = TRUE;
     setsockopt(s, IPPROTO_TCP, 0x0001, (PCSTR)&on, sizeof(BOOL));
 }
@@ -385,7 +388,7 @@ DWORD CFTPServerConn::Run() {
                 continue;
             }
             DWORD createFlags = (m_restPos > 0) ? OPEN_EXISTING : CREATE_ALWAYS;
-            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, 0, NULL, createFlags, 0, NULL);
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, createFlags, 0, NULL);
             if (hFile == INVALID_HANDLE_VALUE) {
                 CloseDataSocket();
                 SendReply("550 Can't create file");
@@ -416,7 +419,7 @@ DWORD CFTPServerConn::Run() {
                 SendReply("425 Can't open data connection");
                 continue;
             }
-            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
             if (hFile == INVALID_HANDLE_VALUE) {
                 CloseDataSocket();
                 SendReply("550 Can't open file");
@@ -653,7 +656,7 @@ DWORD CFTPServerConn::Run() {
                 SendReply("425 Can't open data connection");
                 continue;
             }
-            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
             if (hFile == INVALID_HANDLE_VALUE) {
                 CloseDataSocket();
                 SendReply("550 Can't create file");
