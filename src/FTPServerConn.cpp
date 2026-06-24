@@ -15,6 +15,7 @@ CFTPServerConn::~CFTPServerConn() {
     if (m_dataSocket != INVALID_SOCKET) closesocket(m_dataSocket);
     if (m_cmdSocket != INVALID_SOCKET) closesocket(m_cmdSocket);
     if (m_passiveSocket != INVALID_SOCKET) closesocket(m_passiveSocket);
+    if (m_thread) CloseHandle(m_thread);
 }
 
 void CFTPServerConn::Start() {
@@ -323,7 +324,7 @@ DWORD CFTPServerConn::Run() {
             m_passive = true;
         } else if (strcmp(cmd, "PORT") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
-            int h1, h2, h3, h4, p1, p2;
+            int h1 = 0, h2 = 0, h3 = 0, h4 = 0, p1 = 0, p2 = 0;
             sscanf_s(argBuf, "%d,%d,%d,%d,%d,%d", &h1, &h2, &h3, &h4, &p1, &p2);
             char *a = (char*)&m_xferAddr.sin_addr;
             char *p = (char*)&m_xferAddr.sin_port;
@@ -677,6 +678,7 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "REIN") == 0) {
             m_loggedIn = false;
             m_gotUser = false;
+            m_abortFlag = false;
             m_curPath.clear();
             m_renameFrom.clear();
             m_restPos = 0;
