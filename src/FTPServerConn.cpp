@@ -45,6 +45,9 @@ int CFTPServerConn::CreatePassiveSocket() {
     BOOL on = TRUE;
     setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
     setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
+    int buf = 256 * 1024;
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (PCSTR)&buf, sizeof(buf));
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (PCSTR)&buf, sizeof(buf));
 
     sockaddr_in local;
     local.sin_family = AF_INET;
@@ -67,17 +70,26 @@ int CFTPServerConn::CreatePassiveSocket() {
     return (int)s;
 }
 
+static void TuneDataSocket(SOCKET s) {
+    BOOL on = TRUE;
+    setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
+    setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
+    int buf = 256 * 1024;
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (PCSTR)&buf, sizeof(buf));
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (PCSTR)&buf, sizeof(buf));
+    setsockopt(s, IPPROTO_TCP, 0x0001, (PCSTR)&on, sizeof(BOOL));
+}
+
 SOCKET CFTPServerConn::AcceptOrConnect() {
     m_abortFlag = false;
     if (m_passive) {
         m_dataSocket = accept(m_passiveSocket, NULL, NULL);
+        if (m_dataSocket != INVALID_SOCKET) TuneDataSocket(m_dataSocket);
         return m_dataSocket;
     } else {
         SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
         if (s == INVALID_SOCKET) return INVALID_SOCKET;
-        BOOL on = TRUE;
-        setsockopt(s, SOL_SOCKET, 0x5802, (PCSTR)&on, sizeof(BOOL));
-        setsockopt(s, SOL_SOCKET, 0x5801, (PCSTR)&on, sizeof(BOOL));
+        TuneDataSocket(s);
         if (connect(s, (sockaddr*)&m_xferAddr, sizeof(m_xferAddr)) < 0) {
             closesocket(s);
             return INVALID_SOCKET;
@@ -335,32 +347,35 @@ DWORD CFTPServerConn::Run() {
         } else if (strcmp(cmd, "RETR") == 0) {
             if (!m_loggedIn) { SendReply("530 Not logged in"); continue; }
             string fp = GetFullPath(argBuf);
-            FILE *f = NULL;
-            fopen_s(&f, fp.c_str(), "rb");
-            if (!f) {
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+            if (hFile == INVALID_HANDLE_VALUE) {
                 SendReply("550 File not found");
                 continue;
             }
-            if (m_restPos > 0) fseek(f, (long)m_restPos, SEEK_SET);
+            if (m_restPos > 0) {
+                LARGE_INTEGER li;
+                li.QuadPart = m_restPos;
+                SetFilePointerEx(hFile, li, NULL, FILE_BEGIN);
+            }
             m_restPos = 0;
             SendReply("150 Opening BINARY data connection");
             SOCKET ds = AcceptOrConnect();
             if (ds == INVALID_SOCKET) {
-                fclose(f);
+                CloseHandle(hFile);
                 SendReply("425 Can't open data connection");
                 continue;
             }
-            int n;
-            while ((n = (int)fread(m_xferBuf, 1, XFER_BUF_SIZE, f)) > 0) {
+            DWORD n;
+            while (ReadFile(hFile, m_xferBuf, XFER_BUF_SIZE, &n, NULL) && n > 0) {
                 if (m_abortFlag) break;
                 int sent = 0;
-                while (sent < n) {
+                while (sent < (int)n) {
                     int r = send(ds, m_xferBuf + sent, n - sent, 0);
                     if (r <= 0) break;
                     sent += r;
                 }
             }
-            fclose(f);
+            CloseHandle(hFile);
             CloseDataSocket();
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "STOR") == 0) {
@@ -373,22 +388,27 @@ DWORD CFTPServerConn::Run() {
                 SendReply("425 Can't open data connection");
                 continue;
             }
-            FILE *f = NULL;
-            const char *mode = (m_restPos > 0) ? "ab" : "wb";
-            fopen_s(&f, fp.c_str(), mode);
-            if (!f) {
+            DWORD createFlags = (m_restPos > 0) ? OPEN_EXISTING : CREATE_ALWAYS;
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, 0, NULL, createFlags, 0, NULL);
+            if (hFile == INVALID_HANDLE_VALUE) {
                 CloseDataSocket();
                 SendReply("550 Can't create file");
                 continue;
             }
-            if (m_restPos > 0) fseek(f, (long)m_restPos, SEEK_SET);
+            if (m_restPos > 0) {
+                LARGE_INTEGER li;
+                li.QuadPart = m_restPos;
+                SetFilePointerEx(hFile, li, NULL, FILE_BEGIN);
+                SetEndOfFile(hFile);
+            }
             m_restPos = 0;
             int n;
             while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
                 if (m_abortFlag) break;
-                fwrite(m_xferBuf, 1, n, f);
+                DWORD written;
+                WriteFile(hFile, m_xferBuf, n, &written, NULL);
             }
-            fclose(f);
+            CloseHandle(hFile);
             CloseDataSocket();
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "APPE") == 0) {
@@ -400,20 +420,23 @@ DWORD CFTPServerConn::Run() {
                 SendReply("425 Can't open data connection");
                 continue;
             }
-            FILE *f = NULL;
-            fopen_s(&f, fp.c_str(), "ab");
-            if (!f) {
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+            if (hFile == INVALID_HANDLE_VALUE) {
                 CloseDataSocket();
                 SendReply("550 Can't open file");
                 continue;
             }
+            LARGE_INTEGER li;
+            li.QuadPart = 0;
+            SetFilePointerEx(hFile, li, NULL, FILE_END);
             SendReply("150 Opening BINARY data connection");
             int n;
             while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
                 if (m_abortFlag) break;
-                fwrite(m_xferBuf, 1, n, f);
+                DWORD written;
+                WriteFile(hFile, m_xferBuf, n, &written, NULL);
             }
-            fclose(f);
+            CloseHandle(hFile);
             CloseDataSocket();
             SendReply("226 Transfer complete");
         } else if (strcmp(cmd, "DELE") == 0) {
@@ -634,9 +657,8 @@ DWORD CFTPServerConn::Run() {
                 SendReply("425 Can't open data connection");
                 continue;
             }
-            FILE *f = NULL;
-            fopen_s(&f, fp.c_str(), "wb");
-            if (!f) {
+            HANDLE hFile = CreateFileA(fp.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+            if (hFile == INVALID_HANDLE_VALUE) {
                 CloseDataSocket();
                 SendReply("550 Can't create file");
                 continue;
@@ -645,9 +667,10 @@ DWORD CFTPServerConn::Run() {
             int n;
             while ((n = recv(ds, m_xferBuf, XFER_BUF_SIZE, 0)) > 0) {
                 if (m_abortFlag) break;
-                fwrite(m_xferBuf, 1, n, f);
+                DWORD written;
+                WriteFile(hFile, m_xferBuf, n, &written, NULL);
             }
-            fclose(f);
+            CloseHandle(hFile);
             CloseDataSocket();
             SendReply("226 Transfer complete, %s", name.c_str());
         } else if (strcmp(cmd, "ALLO") == 0) {
