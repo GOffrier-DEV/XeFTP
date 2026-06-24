@@ -12,11 +12,11 @@ if "%1"=="Release" set CONFIG=Release
 set OUTDIR=%CONFIG%
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
 
-set CFLAGS=/nologo /c /TP /GS- /GF- /GR- /W3 /D_XBOX /D_XBOX360 /DNDEBUG /DIMGUI_DISABLE_WIN32_FUNCTIONS /I"." /I"imgui"
+set CFLAGS=/nologo /c /TP /GS- /GF- /GR- /W3 /D_XBOX /D_XBOX360 /DNDEBUG /DIMGUI_DISABLE_WIN32_FUNCTIONS /I"." /I"imgui" /I"imgui\examples\imgui"
 set LIBS=libcMT.lib libcpMT.lib d3d9.lib d3dx9.lib xapilib.lib xboxkrnl.lib xnet.lib oldnames.lib xgraphics.lib
 
 if "%CONFIG%"=="Debug" (
-    set CFLAGS=/nologo /c /TP /GS- /GF- /GR- /W3 /D_XBOX /D_XBOX360 /D_DEBUG /Od /DIMGUI_DISABLE_WIN32_FUNCTIONS /I"." /I"imgui"
+    set CFLAGS=/nologo /c /TP /GS- /GF- /GR- /W3 /D_XBOX /D_XBOX360 /D_DEBUG /Od /DIMGUI_DISABLE_WIN32_FUNCTIONS /I"." /I"imgui" /I"imgui\examples\imgui"
     set LIBS=libcMTD.lib libcpMTD.lib d3d9.lib d3dx9d.lib xapilibd.lib xboxkrnl.lib xnetd.lib oldnames.lib xgraphics.lib
 )
 
@@ -39,22 +39,22 @@ if %ERRORLEVEL% NEQ 0 goto error
 cl %CFLAGS% /Fosrc\Shared.obj src\Shared.cpp /Yustdafx.h /Fp%OUTDIR%\stdafx.pch
 if %ERRORLEVEL% NEQ 0 goto error
 
-cl %CFLAGS% /Fo%OUTDIR%\imgui.obj imgui\imgui.cpp
+cl %CFLAGS% /Fo%OUTDIR%\imgui.obj imgui\examples\imgui\imgui.cpp
 if %ERRORLEVEL% NEQ 0 goto error
 
-cl %CFLAGS% /Fo%OUTDIR%\imgui_draw.obj imgui\imgui_draw.cpp
+cl %CFLAGS% /Fo%OUTDIR%\imgui_draw.obj imgui\examples\imgui\imgui_draw.cpp
 if %ERRORLEVEL% NEQ 0 goto error
 
-cl %CFLAGS% /Fo%OUTDIR%\imgui_widgets.obj imgui\imgui_widgets.cpp
+cl %CFLAGS% /Fo%OUTDIR%\imgui_widgets.obj imgui\examples\imgui\imgui_widgets.cpp
 if %ERRORLEVEL% NEQ 0 goto error
 
-cl %CFLAGS% /Fo%OUTDIR%\imgui_tables.obj imgui\imgui_tables.cpp
+cl %CFLAGS% /Fo%OUTDIR%\imgui_tables.obj imgui\examples\imgui\imgui_tables.cpp
 if %ERRORLEVEL% NEQ 0 goto error
 
-cl %CFLAGS% /Fo%OUTDIR%\imgui_impl_dx9.obj imgui_impl_dx9.cpp
+cl %CFLAGS% /Fo%OUTDIR%\imgui_impl_dx9.obj imgui\imgui_impl_dx9.cpp
 if %ERRORLEVEL% NEQ 0 goto error
 
-cl %CFLAGS% /Fo%OUTDIR%\imgui_impl_xbox360.obj imgui_impl_xbox360.cpp
+cl %CFLAGS% /Fo%OUTDIR%\imgui_impl_xbox360.obj imgui\imgui_impl_xbox360.cpp
 if %ERRORLEVEL% NEQ 0 goto error
 
 echo === Linking ===
